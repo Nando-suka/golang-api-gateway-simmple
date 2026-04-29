@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -192,6 +193,34 @@ func (gh *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[ERROR] No backend alive for %s %s", r.Method, r.URL.Path)
 		return
 	}
+
+	// clone request agar tidak menggangu request asli
+	req := r.Clone(r.Context())
+
+	resp, err := backend.Execute(req)
+	if err != nil {
+		log.Printf("[CB] Request to %s failed: %v", backend.URL, err)
+		http.Error(w, "Backend error", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	// salin header
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+
+	//
+	// Salin body response
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		log.Printf("[ERROR] Copy response body: %v", err)
+	}
+
+	log.Printf("[LB] Forward %s %s to %s - status %d", r.Method, r.URL.Path, backend.URL, resp.StatusCode)
+
 	proxy := httputil.NewSingleHostReverseProxy(backend.URL)
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		log.Printf("[Proxy Error] %s: %v", backend.URL, err)
