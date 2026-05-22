@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -38,9 +37,9 @@ func initRedis() {
 		DB:   0,
 	})
 	if _, err := rdb.Ping(ctx).Result(); err != nil {
-		log.Fatal("Gagal konek ke Redis:", err)
+		log.Fatal("Gagal terhubung ke Redis:", err)
 	}
-	log.Println("✅ Terhubung ke Redis")
+	log.Println("Terhubung ke Redis")
 }
 
 // ------------------------------
@@ -61,6 +60,10 @@ func (cw *cacheWriter) WriteHeader(code int) {
 func (cw *cacheWriter) Write(b []byte) (int, error) {
 	cw.body.Write(b)
 	return cw.ResponseWriter.Write(b)
+}
+
+func (cw *cacheWriter) BodyString() string {
+	return cw.body.String()
 }
 
 func (cw *cacheWriter) Header() http.Header {
@@ -98,14 +101,15 @@ func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 // ------------------------------
 func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		apiKey := r.Header.Get("X-API-Key")
-		if apiKey == "" {
-			http.Error(w, "Missing X-API-Key header", http.StatusUnauthorized)
+		// Ambil user_id dari context (sudah di-set oleh JWTMiddleware)
+		userID, ok := r.Context().Value("user_id").(string)
+		if !ok || userID == "" {
+			http.Error(w, "Unauthorized: missing user id", http.StatusUnauthorized)
 			return
 		}
 		now := time.Now().Unix()
 		windowStart := now - windowSec
-		key := fmt.Sprintf("rate:%s", apiKey)
+		key := fmt.Sprintf("rate:%s", userID)
 
 		pipe := rdb.Pipeline()
 		pipe.ZRemRangeByScore(ctx, key, "0", fmt.Sprintf("%d", windowStart))
@@ -194,9 +198,7 @@ func (gh *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// clone request agar tidak menggangu request asli
 	req := r.Clone(r.Context())
-
 	resp, err := backend.Execute(req)
 	if err != nil {
 		log.Printf("[CB] Request to %s failed: %v", backend.URL, err)
@@ -205,7 +207,6 @@ func (gh *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	// salin header
 	for key, values := range resp.Header {
 		for _, value := range values {
 			w.Header().Add(key, value)
@@ -213,21 +214,10 @@ func (gh *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 
-	//
-	// Salin body response
 	if _, err := io.Copy(w, resp.Body); err != nil {
 		log.Printf("[ERROR] Copy response body: %v", err)
 	}
-
 	log.Printf("[LB] Forward %s %s to %s - status %d", r.Method, r.URL.Path, backend.URL, resp.StatusCode)
-
-	proxy := httputil.NewSingleHostReverseProxy(backend.URL)
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Printf("[Proxy Error] %s: %v", backend.URL, err)
-		http.Error(w, "Bad Gateway", http.StatusBadGateway)
-	}
-	log.Printf("[LB] Forward %s %s to %s", r.Method, r.URL.Path, backend.URL)
-	proxy.ServeHTTP(w, r)
 }
 
 // ------------------------------
@@ -240,6 +230,7 @@ func main() {
 		"http://localhost:8081",
 		"http://localhost:8082",
 		"http://localhost:8083",
+		"http://localhost:8084",
 	}
 	lb, err := NewLoadBalancer(backendURLs)
 	if err != nil {
@@ -249,12 +240,28 @@ func main() {
 
 	gw := &GatewayHandler{lb: lb}
 
-	// Middleware chain
 	finalHandler := loggingMiddleware(
-		rateLimitMiddleware(
-			cacheMiddleware(gw.ServeHTTP), // perbaikan: langsung gunakan gw.ServeHTTP
+		JWTMiddleware(
+			rateLimitMiddleware(
+				cacheMiddleware(gw.ServeHTTP),
+			),
 		),
 	)
+
+	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Contoh: ambil username/password dari body (abaikan validasi untuk demo)
+		token, err := GenerateJWT("user123", "user")
+		if err != nil {
+			http.Error(w, "Cannot generate token", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"token":"%s"}`, token)
+	})
 
 	http.HandleFunc("/", finalHandler)
 	log.Println("🚀 API Gateway dengan Multi-Backend & Load Balancing berjalan di :8080")

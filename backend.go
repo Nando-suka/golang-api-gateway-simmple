@@ -22,6 +22,11 @@ func main() {
 
 	// Main endpoint untuk testing
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if port == "8082" {
+			http.Error(w, "Simulated Error", http.StatusInternalServerError)
+			return
+		}
+		
 		log.Printf("Backend %s: %s %s", port, r.Method, r.URL.Path)
 		time.Sleep(30 * time.Millisecond) // simulasi proses
 		fmt.Fprintf(w, "Response dari backend %s pada %s", port, time.Now().Format(time.RFC3339))
