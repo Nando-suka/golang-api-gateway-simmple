@@ -13,7 +13,7 @@ import (
 
 // Secret key untuk signing JWT (simpan di environment variable di production)
 var jwtSecret = []byte("rahasia_super_secret_ubah_di_production")
-	
+
 // Claims struct – bisa ditambah field sesuai kebutuhan
 type CustomClaims struct {
 	UserID string `json:"user_id"`

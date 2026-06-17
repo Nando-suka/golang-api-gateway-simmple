@@ -146,7 +146,6 @@ func (lb *LoadBalancer) HealthCheck(interval time.Duration) {
 	}()
 }
 
-// UpdateBackends (opsional) untuk mengubah daftar backend secara dinamis
 func (lb *LoadBalancer) UpdateBackends(newURLs []string) error {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()

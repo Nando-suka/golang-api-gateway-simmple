@@ -42,9 +42,7 @@ func initRedis() {
 	log.Println("Terhubung ke Redis")
 }
 
-// ------------------------------
 // Helper: ResponseWriter untuk intercept status & body
-// ------------------------------
 type cacheWriter struct {
 	http.ResponseWriter
 	body    *bytes.Buffer
@@ -84,9 +82,7 @@ func (sw *statusWriter) WriteHeader(code int) {
 	sw.ResponseWriter.WriteHeader(code)
 }
 
-// ------------------------------
 // Middleware: Logging
-// ------------------------------
 func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -132,9 +128,7 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ------------------------------
 // Middleware: Caching (only GET)
-// ------------------------------
 func cacheMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -183,9 +177,7 @@ func cacheMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ------------------------------
 // Handler Utama dengan Load Balancer
-// ------------------------------
 type GatewayHandler struct {
 	lb *LoadBalancer
 }
@@ -220,9 +212,7 @@ func (gh *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[LB] Forward %s %s to %s - status %d", r.Method, r.URL.Path, backend.URL, resp.StatusCode)
 }
 
-// ------------------------------
 // Main
-// ------------------------------
 func main() {
 	initRedis()
 
